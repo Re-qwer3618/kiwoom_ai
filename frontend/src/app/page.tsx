@@ -1,51 +1,69 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
-import { createChart } from 'lightweight-charts';
+import { useEffect, useRef, useState } from 'react';
+import { createChart, IChartApi, ISeriesApi } from 'lightweight-charts';
 
-export default function Dashboard() {
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-  const [balance, setBalance] = useState({ dbst_bal: 0, tot_evlt_amt: 0 });
-  const [logs, setLogs] = useState<string[]>([]);
+export default function QuantDashboard() {
+  const chartContainer = useRef<HTMLDivElement>(null);
+  const chart = useRef<IChartApi | null>(null);
+  const candleSeries = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const [logs, setLogs] = useState<any[]>([]);
 
   useEffect(() => {
-    // 1. 차트 초기화
-    const chart = createChart(chartContainerRef.current!, {
-      layout: { background: { color: '#131722' }, textColor: '#d1d4dc' },
-      grid: { vertLines: { color: '#2a2e39' }, horzLines: { color: '#2a2e39' } },
-      width: 800,
-      height: 400,
+    // TradingView Lightweight Charts 초기화
+    chart.current = createChart(chartContainer.current!, {
+      layout: { background: { color: '#0B0E14' }, textColor: '#D1D4DC' },
+      grid: { vertLines: { color: '#1F2937' }, horzLines: { color: '#1F2937' } },
+      width: chartContainer.current?.clientWidth,
+      height: 600,
     });
-    const candlestickSeries = chart.addCandlestickSeries();
+    
+    candleSeries.current = chart.current.addCandlestickSeries({
+      upColor: '#F87171', downColor: '#60A5FA', borderVisible: false, wickUpColor: '#F87171', wickDownColor: '#60A5FA'
+    });
+    
+    // REST API를 통해 백엔드의 Parquet 시계열 데이터 로드
+    fetch('http://localhost:8000/api/v1/chart/005930')
+      .then(res => res.json())
+      .then(result => candleSeries.current?.setData(result.data));
 
-    // 2. FastAPI WebSocket 연동
-    const ws = new WebSocket('ws://localhost:8000/ws/market');
+    // FastAPI WebSocket 연동 (실시간 체결 시그널 수신)
+    const ws = new WebSocket('ws://localhost:8000/ws/trading');
     ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.type === 'TRADE_SIGNAL') {
-        setLogs(prev => [`[${message.timestamp}] ${message.action} ${message.stk_cd} (확률: ${message.probability})`, ...prev]);
+      const data = JSON.parse(event.data);
+      if (data.event === 'TRADE') {
+        setLogs(prev => [data, ...prev]);
+        candleSeries.current?.setMarkers([{ 
+          time: (new Date(data.timestamp).getTime() / 1000) as any, 
+          position: data.action === 'BUY' ? 'belowBar' : 'aboveBar', 
+          color: data.action === 'BUY' ? '#F87171' : '#60A5FA', 
+          shape: data.action === 'BUY' ? 'arrowUp' : 'arrowDown', 
+          text: `AI ${data.probability}%` 
+        }]);
       }
     };
 
-    return () => { chart.remove(); ws.close(); };
+    return () => { chart.current?.remove(); ws.close(); };
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8 font-sans">
-      <h1 className="text-3xl font-bold mb-6">AI Quant Trading Dashboard</h1>
-      
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-2 bg-gray-800 p-4 rounded-lg shadow-lg">
-          <h2 className="text-xl mb-4 border-b border-gray-700 pb-2">실시간 차트 모니터링</h2>
-          <div ref={chartContainerRef} />
+    <div className="bg-[#0B0E14] text-white min-h-screen p-6 grid grid-cols-4 gap-6">
+      <div className="col-span-3 border border-gray-800 shadow-xl rounded-lg overflow-hidden">
+        <div className="p-4 bg-[#131722] border-b border-gray-800">
+          <h1 className="text-xl font-bold font-sans">AI Quant Console - Samsung (005930)</h1>
         </div>
-        
-        <div className="bg-gray-800 p-4 rounded-lg shadow-lg flex flex-col">
-          <h2 className="text-xl mb-4 border-b border-gray-700 pb-2">AI 매매 시그널 로그</h2>
-          <div className="flex-1 overflow-y-auto space-y-2 text-sm">
-            {logs.map((log, idx) => (
-              <div key={idx} className="p-2 bg-gray-700 rounded text-green-400">{log}</div>
-            ))}
-          </div>
+        <div ref={chartContainer} />
+      </div>
+      <div className="col-span-1 border border-gray-800 rounded-lg p-4 bg-[#131722] flex flex-col">
+        <h2 className="text-lg font-bold mb-4 border-b border-gray-700 pb-2">Execution Logs</h2>
+        <div className="overflow-y-auto flex-1 font-mono text-sm space-y-3">
+          {logs.map((log, idx) => (
+            <div key={idx} className="p-3 rounded-md bg-gray-900/50 border border-gray-700">
+              <div className={`font-bold ${log.action === 'BUY' ? 'text-red-400' : 'text-blue-400'}`}>
+                {log.action} {log.stk_cd} <span className="float-right">{log.probability}%</span>
+              </div>
+              <div className="text-gray-400 mt-1">Price: ₩{log.price.toLocaleString()}</div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
