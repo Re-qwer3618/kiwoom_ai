@@ -3,18 +3,3 @@
 .venv/
 __pycache__/
 
-# Data & Models
-data/
-*.parquet
-*.pkl
-*.csv
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Frontend/Mobile build files
-frontend/node_modules/
-frontend/.next/
-mobile/build/
-mobile/.dart_tool/
